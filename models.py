@@ -1,7 +1,6 @@
-from dataclasses import dataclass
-from typing import List
+from pydantic import BaseModel
+from typing import Dict
 
-@dataclass
-class UserWords:
-    user_id: int
-    words: List[str]
+class UserWords(BaseModel):
+    user_id: str
+    words: Dict[str, str] = {} 

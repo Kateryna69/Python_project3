@@ -1,115 +1,141 @@
 import asyncio
+import random
+import logging
 from aiogram import Bot, Dispatcher, types
-from aiogram.filters import Command
-
 from config import BOT_TOKEN
-from command import register_commands
+from data import load_data, save_data
+from keyboards import main_kb
+from command import (
+    START_COMMAND, HELP_COMMAND, ADD_WORD_COMMAND,
+    MY_WORDS_COMMAND, QUIZ_COMMAND, DELETE_WORD_COMMAND,
+    ALL_BOT_COMMANDS
+)
 
-from aiogram import types
-from aiogram.filters import Command
+logging.basicConfig(level=logging.INFO)
 
-user_words = {}
-# --- Створення бота та диспетчера ---
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
+user_states = {}  
 
-# --- Хендлер старту ---
-@dp.message(Command("start"))
+
+async def set_commands():
+    await bot.set_my_commands(ALL_BOT_COMMANDS)
+
+
+@dp.message(START_COMMAND)
 async def cmd_start(message: types.Message):
     await message.answer(
-        "Привіт! 👋 Я бот для вивчення англійської мови.\n"
-        "Використовуй /help, щоб побачити всі команди."
+        "👋 Привіт! Я бот для вивчення англійських слів.\n"
+        "Вибери дію нижче 👇",
+        reply_markup=main_kb
     )
 
-
-# --- Хендлер допомоги ---
-@dp.message(Command("help"))
+@dp.message(HELP_COMMAND)
 async def cmd_help(message: types.Message):
     await message.answer(
-        "📚 Доступні команди:\n"
-        "/add — додати слово\n"
-        "/words — показати твої слова\n"
-        "/delete — видалити слово\n"
-        "/test — пройти тест\n"
-        "/help — допомога"
+        "📌 Команди:\n"
+        "/start – почати роботу\n"
+        "/help – отримати довідку\n"
+        "/addword – додати слово\n"
+        "/mywords – подивитись мої слова\n"
+        "/quiz – пройти тест\n"
+        "/delword – видалити слово"
     )
 
 
-def register_commands(dp):
-    @dp.message(Command("add"))
-    async def cmd_add(message: types.Message):
-        parts = message.text.split(maxsplit=1)
-        if len(parts) < 2:
-            await message.answer("❌ Напиши слово після команди /add")
+@dp.message(ADD_WORD_COMMAND)
+async def add_word(message: types.Message):
+    user_id = str(message.from_user.id)
+    user_states[user_id] = {"state": "awaiting_english"}
+    await message.answer("✍️ Введи слово англійською:")
+
+@dp.message()
+async def handle_message(message: types.Message):
+    user_id = str(message.from_user.id)
+    data = load_data()
+    state = user_states.get(user_id, {}).get("state")
+
+    
+    if state == "awaiting_english":
+        english_word = message.text.lower()
+        if user_id not in data:
+            data[user_id] = {"words": {}}
+        if english_word in data[user_id]["words"]:
+            await message.answer("⚠️ Це слово вже є.")
             return
+        user_states[user_id]["english_word"] = english_word
+        user_states[user_id]["state"] = "awaiting_translation"
+        await message.answer(f"✍️ Введи переклад слова '{english_word}':")
+        return
 
-        word = parts[1].strip()
-        user_id = message.from_user.id
-        user_words.setdefault(user_id, []).append(word)
+    if state == "awaiting_translation":
+        english_word = user_states[user_id]["english_word"]
+        translation = message.text.lower()
+        data[user_id]["words"][english_word] = translation
+        save_data(data)
+        user_states.pop(user_id)
+        await message.answer(f"✅ Додано слово '{english_word}' з перекладом '{translation}'")
+        return
 
-        await message.answer(f"✅ Слово <b>{word}</b> додано!", parse_mode="HTML")
-
-    @dp.message(Command("words"))
-    async def cmd_words(message: types.Message):
-        user_id = message.from_user.id
-        words = user_words.get(user_id, [])
-        if not words:
-            await message.answer("У тебе ще немає слів. Додай їх через /add")
+    
+    if state == "awaiting_delete":
+        word_to_delete = message.text.lower()
+        if user_id in data and word_to_delete in data[user_id]["words"]:
+            del data[user_id]["words"][word_to_delete]
+            save_data(data)
+            await message.answer(f"❌ Слово '{word_to_delete}' видалено.")
         else:
-            await message.answer("📖 Твої слова:\n" + "\n".join(words))
+            await message.answer("⚠️ Такого слова немає.")
+        user_states.pop(user_id)
+        return
 
-    @dp.message(Command("delete"))
-    async def cmd_delete(message: types.Message):
-        parts = message.text.split(maxsplit=1)
-        if len(parts) < 2:
-            await message.answer("❌ Напиши слово після /delete")
-            return
-
-        word = parts[1].strip()
-        user_id = message.from_user.id
-        words = user_words.get(user_id, [])
-
-        if word in words:
-            words.remove(word)
-            await message.answer(f"🗑️ Слово <b>{word}</b> видалено!", parse_mode="HTML")
+    
+    if state == "awaiting_quiz":
+        correct_translation = user_states[user_id]["translation"]
+        if message.text.lower() == correct_translation:
+            await message.answer("✅ Вірно!")
         else:
-            await message.answer(f"❌ Слова <b>{word}</b> немає у твоєму списку.", parse_mode="HTML")
+            await message.answer(f"❌ Невірно! Правильний переклад: {correct_translation}")
+        user_states.pop(user_id)
+        return
 
-    @dp.message(Command("test"))
-    async def cmd_test(message: types.Message):
-        user_id = message.from_user.id
-        words = user_words.get(user_id, [])
 
-        if not words:
-            await message.answer("У тебе немає слів для тесту. Додай їх через /add")
-            return
+@dp.message(MY_WORDS_COMMAND)
+async def my_words(message: types.Message):
+    user_id = str(message.from_user.id)
+    data = load_data()
+    words = data.get(user_id, {}).get("words", {})
+    if not words:
+        await message.answer("📂 У тебе ще немає слів.")
+    else:
+        text = "\n".join([f"{eng} – {tr}" for eng, tr in words.items()])
+        await message.answer("📖 Твої слова:\n" + text)
 
-        import random
-        word = random.choice(words)
-        await message.answer(
-            f"❓ Як перекладається слово: <b>{word}</b> ? (Відповідь просто напиши у чат 🙂)",
-            parse_mode="HTML"
-        )
+
+@dp.message(DELETE_WORD_COMMAND)
+async def delete_word(message: types.Message):
+    user_id = str(message.from_user.id)
+    user_states[user_id] = {"state": "awaiting_delete"}
+    await message.answer("Введи слово, яке хочеш видалити:")
+
+
+@dp.message(QUIZ_COMMAND)
+async def quiz(message: types.Message):
+    user_id = str(message.from_user.id)
+    data = load_data()
+    words = data.get(user_id, {}).get("words", {})
+    if not words:
+        await message.answer("⚠️ Спочатку додай слова для тесту.")
+        return
+    word, translation = random.choice(list(words.items()))
+    user_states[user_id] = {"state": "awaiting_quiz", "translation": translation}
+    await message.answer(f"❓ Переклади слово: {word}")
 
 
 async def main():
-    # реєструємо всі додаткові команди з command.py
-    register_commands(dp)
-
-    # встановлюємо команди в меню Telegram
-    await bot.set_my_commands([
-        types.BotCommand(command="start", description="Почати роботу"),
-        types.BotCommand(command="help", description="Допомога"),
-        types.BotCommand(command="add", description="Додати слово"),
-        types.BotCommand(command="words", description="Показати мої слова"),
-        types.BotCommand(command="delete", description="Видалити слово"),
-        types.BotCommand(command="test", description="Пройти тест"),
-    ])
-
-    print("✅ Бот запущений...")
+    await set_commands()
     await dp.start_polling(bot)
-
 
 if __name__ == "__main__":
     asyncio.run(main())
