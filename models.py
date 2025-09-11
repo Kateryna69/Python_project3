@@ -1,6 +1,6 @@
-from pydantic import BaseModel
+from dataclasses import dataclass, field
 from typing import Dict
 
-class UserWords(BaseModel):
-    user_id: str
-    words: Dict[str, str] = {} 
+@dataclass
+class UserData:
+    words: Dict[str, str] = field(default_factory=dict)  # англійське слово → переклад

@@ -1,104 +1,73 @@
 import asyncio
 import random
-import logging
-from aiogram import Bot, Dispatcher, types
+from aiogram import Bot, Dispatcher, types, F
+from aiogram.enums import ParseMode
+from aiogram.filters import Command
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.storage.memory import MemoryStorage
+
+from command import *
 from config import BOT_TOKEN
 from data import load_data, save_data
 from keyboards import main_kb
-from command import (
-    START_COMMAND, HELP_COMMAND, ADD_WORD_COMMAND,
-    MY_WORDS_COMMAND, QUIZ_COMMAND, DELETE_WORD_COMMAND,
-    ALL_BOT_COMMANDS
-)
-
-logging.basicConfig(level=logging.INFO)
-
-bot = Bot(token=BOT_TOKEN)
-dp = Dispatcher()
-
-user_states = {}  
 
 
-async def set_commands():
-    await bot.set_my_commands(ALL_BOT_COMMANDS)
+class AddWordState(StatesGroup):
+    english = State()
+    translation = State()
+
+class DeleteWordState(StatesGroup):
+    word = State()
+
+class QuizState(StatesGroup):
+    waiting_answer = State()
+
+
+bot = Bot(token=BOT_TOKEN, parse_mode=ParseMode.HTML)
+dp = Dispatcher(storage=MemoryStorage())
 
 
 @dp.message(START_COMMAND)
-async def cmd_start(message: types.Message):
-    await message.answer(
-        "👋 Привіт! Я бот для вивчення англійських слів.\n"
-        "Вибери дію нижче 👇",
-        reply_markup=main_kb
-    )
+async def start_cmd(message: types.Message):
+    await message.answer("👋 Привіт! Це бот для вивчення англійських слів.\nВикористовуй меню або команди.", reply_markup=main_kb)
+
 
 @dp.message(HELP_COMMAND)
-async def cmd_help(message: types.Message):
-    await message.answer(
-        "📌 Команди:\n"
-        "/start – почати роботу\n"
-        "/help – отримати довідку\n"
-        "/addword – додати слово\n"
-        "/mywords – подивитись мої слова\n"
-        "/quiz – пройти тест\n"
-        "/delword – видалити слово"
-    )
+async def help_cmd(message: types.Message):
+    await message.answer("📚 Команди:\n"
+                         "/addword – додати слово з перекладом\n"
+                         "/mywords – подивитись мої слова\n"
+                         "/quiz – пройти тест\n"
+                         "/delword – видалити слово")
 
 
 @dp.message(ADD_WORD_COMMAND)
-async def add_word(message: types.Message):
-    user_id = str(message.from_user.id)
-    user_states[user_id] = {"state": "awaiting_english"}
+async def add_word(message: types.Message, state: FSMContext):
     await message.answer("✍️ Введи слово англійською:")
+    await state.set_state(AddWordState.english)
 
-@dp.message()
-async def handle_message(message: types.Message):
+@dp.message(AddWordState.english, F.text)
+async def save_english_word(message: types.Message, state: FSMContext):
+    await state.update_data(english=message.text.lower())
+    await message.answer("🔤 Тепер введи переклад:")
+    await state.set_state(AddWordState.translation)
+
+@dp.message(AddWordState.translation, F.text)
+async def save_translation(message: types.Message, state: FSMContext):
     user_id = str(message.from_user.id)
     data = load_data()
-    state = user_states.get(user_id, {}).get("state")
+    english_word = (await state.get_data())["english"]
+    translation = message.text.lower()
 
-    
-    if state == "awaiting_english":
-        english_word = message.text.lower()
-        if user_id not in data:
-            data[user_id] = {"words": {}}
-        if english_word in data[user_id]["words"]:
-            await message.answer("⚠️ Це слово вже є.")
-            return
-        user_states[user_id]["english_word"] = english_word
-        user_states[user_id]["state"] = "awaiting_translation"
-        await message.answer(f"✍️ Введи переклад слова '{english_word}':")
-        return
+    if user_id not in data:
+        data[user_id] = {"words": {}}
 
-    if state == "awaiting_translation":
-        english_word = user_states[user_id]["english_word"]
-        translation = message.text.lower()
-        data[user_id]["words"][english_word] = translation
-        save_data(data)
-        user_states.pop(user_id)
-        await message.answer(f"✅ Додано слово '{english_word}' з перекладом '{translation}'")
-        return
+    data[user_id]["words"][english_word] = translation
+    save_data(data)
 
-    
-    if state == "awaiting_delete":
-        word_to_delete = message.text.lower()
-        if user_id in data and word_to_delete in data[user_id]["words"]:
-            del data[user_id]["words"][word_to_delete]
-            save_data(data)
-            await message.answer(f"❌ Слово '{word_to_delete}' видалено.")
-        else:
-            await message.answer("⚠️ Такого слова немає.")
-        user_states.pop(user_id)
-        return
-
-    
-    if state == "awaiting_quiz":
-        correct_translation = user_states[user_id]["translation"]
-        if message.text.lower() == correct_translation:
-            await message.answer("✅ Вірно!")
-        else:
-            await message.answer(f"❌ Невірно! Правильний переклад: {correct_translation}")
-        user_states.pop(user_id)
-        return
+    await message.answer(f"✅ Слово '{english_word}' з перекладом '{translation}' додано!")
+    await state.clear()
 
 
 @dp.message(MY_WORDS_COMMAND)
@@ -106,35 +75,66 @@ async def my_words(message: types.Message):
     user_id = str(message.from_user.id)
     data = load_data()
     words = data.get(user_id, {}).get("words", {})
+
     if not words:
-        await message.answer("📂 У тебе ще немає слів.")
-    else:
-        text = "\n".join([f"{eng} – {tr}" for eng, tr in words.items()])
-        await message.answer("📖 Твої слова:\n" + text)
+        await message.answer("📭 У тебе ще немає слів.")
+        return
 
-
-@dp.message(DELETE_WORD_COMMAND)
-async def delete_word(message: types.Message):
-    user_id = str(message.from_user.id)
-    user_states[user_id] = {"state": "awaiting_delete"}
-    await message.answer("Введи слово, яке хочеш видалити:")
+    text = "\n".join([f"{eng} → {ua}" for eng, ua in words.items()])
+    await message.answer(f"📖 Твої слова:\n{text}")
 
 
 @dp.message(QUIZ_COMMAND)
-async def quiz(message: types.Message):
+async def quiz(message: types.Message, state: FSMContext):
     user_id = str(message.from_user.id)
     data = load_data()
     words = data.get(user_id, {}).get("words", {})
+
     if not words:
         await message.answer("⚠️ Спочатку додай слова для тесту.")
         return
+
     word, translation = random.choice(list(words.items()))
-    user_states[user_id] = {"state": "awaiting_quiz", "translation": translation}
+    await state.update_data(word=word, translation=translation)
     await message.answer(f"❓ Переклади слово: {word}")
+    await state.set_state(QuizState.waiting_answer)
+
+@dp.message(QuizState.waiting_answer, F.text)
+async def check_answer(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    word, translation = data["word"], data["translation"]
+
+    if message.text.lower() == translation:
+        await message.answer("✅ Вірно!")
+    else:
+        await message.answer(f"❌ Невірно! Правильний переклад: {translation}")
+
+    await state.clear()
+
+
+@dp.message(DELETE_WORD_COMMAND)
+async def delete_word(message: types.Message, state: FSMContext):
+    await message.answer("❌ Введи слово англійською, яке хочеш видалити:")
+    await state.set_state(DeleteWordState.word)
+
+@dp.message(DeleteWordState.word, F.text)
+async def confirm_delete(message: types.Message, state: FSMContext):
+    user_id = str(message.from_user.id)
+    data = load_data()
+    word = message.text.lower()
+
+    if word in data.get(user_id, {}).get("words", {}):
+        del data[user_id]["words"][word]
+        save_data(data)
+        await message.answer(f"🗑️ Слово '{word}' видалено.")
+    else:
+        await message.answer(f"⚠️ Слово '{word}' не знайдено.")
+
+    await state.clear()
 
 
 async def main():
-    await set_commands()
+    await bot.set_my_commands(ALL_BOT_COMMANDS)
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
