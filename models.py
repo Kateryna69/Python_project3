@@ -3,4 +3,4 @@ from typing import Dict
 
 class UserWords(BaseModel):
     user_id: str
-    words: Dict[str, str] = {}  # англійське слово -> переклад
+    words: Dict[str, str] = {} 

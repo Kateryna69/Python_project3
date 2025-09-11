@@ -133,7 +133,7 @@ async def quiz(message: types.Message):
     user_states[user_id] = {"state": "awaiting_quiz", "translation": translation}
     await message.answer(f"❓ Переклади слово: {word}")
 
-# ============================================
+
 
 async def main():
     await set_commands()
