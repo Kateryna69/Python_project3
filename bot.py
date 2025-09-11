@@ -1,11 +1,8 @@
-import asyncio
-import random
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.enums import ParseMode
-from aiogram.filters import Command
-from aiogram.fsm.state import State, StatesGroup
-from aiogram.fsm.context import FSMContext
+from aiogram.client.default import DefaultBotProperties
 from aiogram.fsm.storage.memory import MemoryStorage
+
 
 from command import *
 from config import BOT_TOKEN
@@ -24,8 +21,12 @@ class QuizState(StatesGroup):
     waiting_answer = State()
 
 
-bot = Bot(token=BOT_TOKEN, parse_mode=ParseMode.HTML)
+bot = Bot(
+    token=BOT_TOKEN,
+    default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+)
 dp = Dispatcher(storage=MemoryStorage())
+
 
 
 @dp.message(START_COMMAND)
