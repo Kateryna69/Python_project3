@@ -1,16 +1,14 @@
 import json
-from pathlib import Path
 
-DATA_FILE = Path("data.json")
-
+DATA_FILE = "data.json"
 
 def load_data():
-    if DATA_FILE.exists():
+    try:
         with open(DATA_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
-    return {}
-
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
 
 def save_data(data: dict):
     with open(DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=4)
+        json.dump(data, f, indent=4, ensure_ascii=False)

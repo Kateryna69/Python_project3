@@ -9,7 +9,7 @@ MY_WORDS_COMMAND = Command("mywords")
 QUIZ_COMMAND = Command("quiz")
 DELETE_WORD_COMMAND = Command("delword")
 
-# Команди для меню
+# Команди для меню Telegram
 ALL_BOT_COMMANDS = [
     BotCommand(command="start", description="Запустити бота"),
     BotCommand(command="help", description="Отримати довідку"),
